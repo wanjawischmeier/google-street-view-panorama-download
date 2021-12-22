@@ -18,9 +18,7 @@ import shutil
 import itertools
 from PIL import Image
 from io import BytesIO
-import os
 import numpy as np
-from skimage import io
 
 def _panoids_url(lat, lon):
     """
@@ -126,7 +124,6 @@ def tiles_info(panoid, zoom=5):
 
     The format is (x, y, filename, fileurl)
     """
-#     image_url = 'http://maps.google.com/cbk?output=tile&panoid={}&zoom={}&x={}&y={}'
     image_url = "http://cbk0.google.com/cbk?output=tile&panoid={}&zoom={}&x={}&y={}"
 
     # The tiles positions
@@ -192,9 +189,9 @@ def stich_tiles(panoid, tiles, directory, final_directory):
     
 
 
-def download_panorama_v3(panoid, zoom=5, disp=False):
+def download_panorama(panoid, zoom=5, disp=False):
     '''
-    v3: save image information in a buffer. (v2: save image to dist then read)
+    save image information in a buffer.
     input:
         panoid: which is an id of image on google maps
         zoom: larger number -> higher resolution, from 1 to 5, better less than 3, some location will fail when zoom larger than 3
@@ -204,7 +201,6 @@ def download_panorama_v3(panoid, zoom=5, disp=False):
     '''
     tile_width = 512
     tile_height = 512
-    # img_w, img_h = int(np.ceil(416*(2**zoom)/tile_width)*tile_width), int(np.ceil(416*( 2**(zoom-1) )/tile_width)*tile_width)
     img_w, img_h = 416*(2**zoom), 416*( 2**(zoom-1) )
     tiles = tiles_info( panoid, zoom=zoom)
     valid_tiles = []
@@ -234,150 +230,3 @@ def download_panorama_v3(panoid, zoom=5, disp=False):
             i+=1
             panorama.paste(im=tile, box=(x*tile_width, y*tile_height))
     return np.array(panorama)
-
-def download_panorama_v1(panoid, zoom=5, disp=False, directory='temp'):
-    '''
-    v1: simplely concatenate original functions
-    input:
-        panoid
-    output:
-        panorama image (uncropped)
-    '''
-    tiles = tiles_info( panoid, zoom=zoom)
-    if not os.path.exists(directory):
-        os.makedirs( directory )
-    # function of download_tiles
-    for i, (x, y, fname, url) in enumerate(tiles):
-
-        if disp and i % 20 == 0:
-            print("Image %d / %d" % (i, len(tiles)))
-
-        # Try to download the image file
-        while True:
-            try:
-                response = requests.get(url, stream=True)
-                break
-            except requests.ConnectionError:
-                print("Connection error. Trying again in 2 seconds.")
-                time.sleep(2)
-        with open(directory + '/' + fname, 'wb') as out_file:
-            shutil.copyfileobj(response.raw, out_file)
-        del response
-    # function of stich_tiles
-    tile_width = 512
-    tile_height = 512
-
-    panorama = Image.new('RGB', (26*tile_width, 13*tile_height))
-
-    for x, y, fname, url in tiles:
-        fname = directory + "/" + fname
-        tile = Image.open(fname)
-        panorama.paste(im=tile, box=(x*tile_width, y*tile_height))
-        del tile
-    delete_tiles( tiles, directory )
-    return np.array(panorama)
-
-def download_panorama_v2(panoid, zoom=5, disp=False, directory='temp'):
-    '''
-    v2: if tile is in invalid region, just skip them. obsolete: use black block instead of downloading
-    input:
-        panoid
-    output:
-        panorama image (uncropped)
-    '''
-    img_w, img_h = 416*(2**zoom), 416*( 2**(zoom-1) )
-    tile_width = 512
-    tile_height = 512
-    
-    tiles = tiles_info( panoid, zoom=zoom)
-    valid_tiles = []
-    if not os.path.exists(directory):
-        os.makedirs( directory )
-    # function of download_tiles
-    for i, tile in enumerate(tiles):
-        x, y, fname, url = tile
-        if disp and i % 20 == 0:
-            print("Image %d / %d" % (i, len(tiles)))
-        if x*tile_width < img_w and y*tile_height < img_h: # tile is valid
-            valid_tiles.append(tile)
-            # Try to download the image file
-            while True:
-                try:
-                    response = requests.get(url, stream=True)
-                    break
-                except requests.ConnectionError:
-                    print("Connection error. Trying again in 2 seconds.")
-                    time.sleep(2)
-            with open(directory + '/' + fname, 'wb') as out_file:
-                shutil.copyfileobj(response.raw, out_file)
-            del response
-            
-    # function to stich
-    panorama = Image.new('RGB', (img_w, img_h))
-    for x, y, fname, url in tiles:
-        if x*tile_width < img_w and y*tile_height < img_h: # tile is valid
-            fname = directory + "/" + fname
-            tile = Image.open(fname)
-            panorama.paste(im=tile, box=(x*tile_width, y*tile_height))
-            del tile
-    delete_tiles( valid_tiles, directory )
-    return np.array(panorama)
-
-def delete_tiles(tiles, directory):
-    for x, y, fname, url in tiles:
-        os.remove(directory + "/" + fname)
-
-
-def api_download(panoid, heading, flat_dir, key, width=640, height=640,
-                 fov=120, pitch=0, extension='jpg', year=2017, fname=None):
-    """
-    Download an image using the official API. These are not panoramas.
-
-    Params:
-        :panoid: the panorama id
-        :heading: the heading of the photo. Each photo is taken with a 360
-            camera. You need to specify a direction in degrees as the photo
-            will only cover a partial region of the panorama. The recommended
-            headings to use are 0, 90, 180, or 270.
-        :flat_dir: the direction to save the image to.
-        :key: your API key.
-        :width: downloaded image width (max 640 for non-premium downloads).
-        :height: downloaded image height (max 640 for non-premium downloads).
-        :fov: image field-of-view.
-        :image_format: desired image format.
-        :fname: file name
-
-    You can find instructions to obtain an API key here: https://developers.google.com/maps/documentation/streetview/
-    """
-    if not fname:
-        fname = "%s_%s_%s" % (year, panoid, str(heading))
-    image_format = extension if extension != 'jpg' else 'jpeg'
-
-    url = "https://maps.googleapis.com/maps/api/streetview"
-    params = {
-        # maximum permitted size for free calls
-        "size": "%dx%d" % (width, height),
-        "fov": fov,
-        "pitch": pitch,
-        "heading": heading,
-        "pano": panoid,
-        "key": key
-    }
-
-    response = requests.get(url, params=params, stream=True)
-    try:
-        img = Image.open(BytesIO(response.content))
-        filename = '%s/%s.%s' % (flat_dir, fname, extension)
-        img.save(filename, image_format)
-    except:
-        print("Image not found")
-        filename = None
-    del response
-    return filename
-
-
-def download_flats(panoid, flat_dir, key, width=400, height=300,
-                   fov=120, pitch=0, extension='jpg', year=2017):
-    for heading in [0, 90, 180, 270]:
-        api_download(panoid, heading, flat_dir, key, width, height, fov, pitch, extension, year)
-
